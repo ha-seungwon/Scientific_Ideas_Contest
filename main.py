@@ -1,119 +1,77 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch_geometric.data import DataLoader
-from torch_geometric.nn import GCNConv
-import networkx as nx
-import matplotlib.pyplot as plt
 import numpy as np
+import dgl
+import torch
+from sklearn.cluster import KMeans
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from PIL import Image
+import warnings
 
-# 임의의 그래프를 생성하는 함수 (노드에 속성 추가)
-def create_random_graph():
-    num_nodes = np.random.randint(5, 15)
-    G = nx.erdos_renyi_graph(num_nodes, 0.2)  # 무작위 그래프 생성
+warnings.filterwarnings('ignore')
+# 이미지 크기와 샘플 개수 설정
 
-    # 노드에 속성 추가
-    for node in G.nodes:
-        G.nodes[node]['attr'] = {
-            'image': create_random_image_data(1),
-            'text': create_random_text_data(1),
-            'numerical': create_random_numerical_data(1)
-        }
+image_size = 32
+# 데이터 샘플 생성 함수
+def generate_sample_from_image(image_path):
+    image = Image.open(image_path)
+    image = image.resize((image_size, image_size))
+    image = np.array(image)
+    text = np.random.choice(['spam', 'ham', 'egg'], size=1)[0]
+    numeric = np.random.rand(4)
+    
+    return {'image': image, 'text': text, 'numeric': numeric}
 
-    return G
+# 이미지 파일 경로
+image_file_paths = ['./data/phone.png', './data/text.png','./data/phone copy.png', './data/text copy.png']
 
-# 임의의 이미지 데이터를 생성하는 함수
-def create_random_image_data(num_samples):
-    image_data = torch.randn(num_samples, 3, 32, 32)  # 32x32 크기의 RGB 이미지 데이터 생성
-    return image_data
+# 데이터 샘플 생성
+data_samples_from_images = [generate_sample_from_image(image_path) for image_path in image_file_paths]
 
-# 임의의 텍스트 데이터를 생성하는 함수
-def create_random_text_data(num_samples):
-    text_data = [f"Text data {i}" for i in range(num_samples)]  # 간단한 텍스트 데이터 생성
-    return text_data
+num_samples = len(data_samples_from_images)
 
-# 임의의 수치형 데이터를 생성하는 함수
-def create_random_numerical_data(num_samples):
-    numerical_data = torch.randn(num_samples, 5)  # 5개의 수치형 특징을 가진 데이터 생성
-    return numerical_data
+# 그래프 생성 (간단한 Fully Connected 그래프)
+g = dgl.DGLGraph()
+g.add_nodes(num_samples)
 
-# 각 노드의 속성을 저장하는 클래스
-class NodeAttributes(torch.utils.data.Dataset):
-    def __init__(self, graph):
-        self.graph = graph
+# 데이터 전처리 및 그래프 생성
+def preprocess_data(data_samples):
+    all_features = []
+    for sample in data_samples:
+        image_feature = sample['image'].reshape(-1)
+        text_feature = np.array([1 if sample['text'] == 'spam' else 0,
+                                 1 if sample['text'] == 'ham' else 0,
+                                 1 if sample['text'] == 'egg' else 0])
+        numeric_feature = sample['numeric']
+        combined_feature = np.concatenate((image_feature, text_feature, numeric_feature))
+        all_features.append(combined_feature)
+    data_feature_len = len(combined_feature)  # 계산된 총 특성의 길이
+    return torch.FloatTensor(all_features), data_feature_len
 
-    def __len__(self):
-        return len(self.graph.nodes)
+data_features, data_feature_len = preprocess_data(data_samples_from_images)
+g.add_edges(g.nodes(), g.nodes())
 
-    def __getitem__(self, idx):
-        node = list(self.graph.nodes)[idx]
-        img = self.graph.nodes[node]['attr']['image']
-        text = self.graph.nodes[node]['attr']['text'][0]
-        num = self.graph.nodes[node]['attr']['numerical']
+# KMeans 클러스터링
+num_clusters = 2
+kmeans = KMeans(n_clusters=num_clusters)  # dtype 설정
+cluster_labels = kmeans.fit_predict(data_features.numpy())
 
-        return (node, img, text, num)
+# t-SNE 차원 축소
+tsne = TSNE(n_components=3, perplexity=3)
+visual_features_tsne = tsne.fit_transform(data_features.numpy())
 
-# GNN 모델 정의
-class GNNModel(nn.Module):
-    def __init__(self, in_channels):
-        super(GNNModel, self).__init__()
-        self.conv1 = GCNConv(in_channels, 16)
-        self.conv2 = GCNConv(16, 8)
-        self.conv3 = GCNConv(8, 4)
-
-    def forward(self, x, edge_index):
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
-        x = self.conv3(x, edge_index)
-        return x
-
-# 임의의 그래프 생성
-graph = create_random_graph()
-nx.draw(graph, with_labels=True)
+# 클러스터별 3D 시각화
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
+scatter = ax.scatter(visual_features_tsne[:, 0], visual_features_tsne[:, 1], visual_features_tsne[:, 2], c=cluster_labels, cmap='rainbow')
+legend1 = ax.legend(*scatter.legend_elements(), loc="upper right", title="Clusters")
+ax.add_artist(legend1)
+ax.set_title('Clustered Data Points (3D)')
 plt.show()
 
-# 데이터 생성
-num_samples = graph.number_of_nodes()
-dataset = NodeAttributes(graph)
+# 새로운 데이터 예측
+new_data_features, _ = preprocess_data(data_samples_from_images)
+predicted_clusters = kmeans.predict(new_data_features.numpy())
 
-# 데이터로더 생성
-loader = DataLoader(dataset, batch_size=num_samples, shuffle=False)
-
-# GNN 모델 생성
-image_data = create_random_image_data(num_samples)
-text_data = create_random_text_data(num_samples)
-numerical_data = create_random_numerical_data(num_samples)
-gnn_model = GNNModel(in_channels=image_data.size(1) + 1 + numerical_data.size(1))  # 이미지, 텍스트, 수치형 데이터 크기를 입력 채널로 사용
-
-# 클러스터링을 위한 노드 임베딩 추출
-def get_node_embeddings():
-    gnn_model.eval()
-    with torch.no_grad():
-        data = next(iter(loader))
-        nodes, images, texts, nums = data
-
-        # 각 노드의 텍스트 데이터를 tensor로 변환하여 unsqueeze 적용
-        texts = torch.tensor(texts, dtype=torch.float32)
-        texts = texts.unsqueeze(1)
-
-        concatenated_data = torch.cat([images, texts, nums], dim=1)
-        edge_index = nx.to_pandas_edgelist(graph).values.T
-        embeddings = gnn_model(concatenated_data, torch.tensor(edge_index, dtype=torch.long))
-    return embeddings
-
-
-# 노드 임베딩 추출
-embeddings = get_node_embeddings()
-
-# 임베딩을 이용한 클러스터링
-from sklearn.cluster import KMeans
-print("start kmeans")
-kmeans = KMeans(n_clusters=3)
-labels = kmeans.fit_predict(embeddings.numpy())
-
-# 결과 출력
-print("Cluster Labels:")
-for node, label in zip(graph.nodes, labels):
-    print(f"Node {node}: Cluster {label}")
+for idx, predicted_cluster in enumerate(predicted_clusters):
+    print(f"Predicted Cluster for Image {idx+1}: {predicted_cluster}")
