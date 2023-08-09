@@ -75,3 +75,5 @@ predicted_clusters = kmeans.predict(new_data_features.numpy())
 
 for idx, predicted_cluster in enumerate(predicted_clusters):
     print(f"Predicted Cluster for Image {idx+1}: {predicted_cluster}")
+
+
