@@ -1,162 +1,125 @@
 import numpy as np
-import dgl
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from sklearn.manifold import TSNE
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
+import torch.nn.functional as F
+from torch_geometric.data import Data, DataLoader
 from PIL import Image
-import warnings
-import dgl.function as fn
-import dgl.nn as dglnn
+from torch_geometric.nn import GCNConv
+from torch_geometric.utils import dense_to_sparse
+import matplotlib.pyplot as plt  # 임포트 추가
+from mpl_toolkits.mplot3d import Axes3D  # 임포트 추가
 
 
-warnings.filterwarnings('ignore')
-# 이미지 크기와 샘플 개수 설정
 
-image_size = 32
-# 데이터 샘플 생성 함수
-def generate_sample_from_image(image_path):
+image_size=16
+def generate_sample_from_image(image_path, index):
     image = Image.open(image_path)
     image = image.resize((image_size, image_size))
     image = np.array(image)
-    text = np.random.choice(['spam', 'ham', 'egg'], size=1)[0]
+    text = np.random.choice(['spam', 'hamm', 'eggg'], size=1)[0]
     numeric = np.random.rand(4)
+    label = index % 2  # 인덱스에 따라 0 또는 1 부여
     
-    return {'image': image, 'text': text, 'numeric': numeric}
-
-# 이미지 파일 경로
-image_file_paths = ['./data/phone.png', './data/text.png','./data/phone copy.png', './data/text copy.png',
-                    './data/phone.png', './data/text.png','./data/phone copy.png', './data/text copy.png',
-                    './data/phone.png', './data/text.png','./data/phone copy.png', './data/text copy.png',
-                    './data/phone.png', './data/text.png','./data/phone copy.png', './data/text copy.png',
-                    './data/phone.png', './data/text.png','./data/phone copy.png', './data/text copy.png',
-                    './data/phone.png', './data/text.png','./data/phone copy.png', './data/text copy.png']
+    return {'image': image, 'text': text, 'numeric': numeric, 'y': label}
 
 # 데이터 샘플 생성
-data_samples_from_images = [generate_sample_from_image(image_path) for image_path in image_file_paths]
 
-num_samples = len(data_samples_from_images)
+# 이미지 파일 경로
+image_file_paths = ['./data/phone.png', './data/text.png','./data/phone.png', './data/text.png',
+                    './data/phone.png', './data/text.png','./data/phone.png', './data/text.png',
+                    './data/phone.png', './data/text.png','./data/phone.png', './data/text.png']
+
+# 데이터 샘플 생성
+
+data_samples_from_images = [generate_sample_from_image(image_path, i) for i, image_path in enumerate(image_file_paths)]
+data_list = []
+for sample in data_samples_from_images:
+    image_feature = sample['image'].flatten()  # 이미지 데이터를 1D 벡터로 변환
+    text_feature = np.array([ord(char) for char in sample['text']])  # 텍스트 데이터를 ASCII 코드로 변환
+    numeric_feature = sample['numeric']
+    
+    y = torch.tensor(sample['y'], dtype=torch.float)
+
+    # 이미지, 텍스트, 숫자 데이터를 PyTorch 텐서로 변환
+    x_image = torch.tensor(image_feature, dtype=torch.float).view(-1, 1)
+    x_text = torch.tensor(text_feature, dtype=torch.float).view(-1, 1)
+    x_numeric = torch.tensor(numeric_feature, dtype=torch.float).view(-1, 1)
+    
+    # 각각의 데이터 텐서를 연결하여 노드 속성 생성
+    x = torch.cat([x_image, x_text, x_numeric], dim=0)
+    
+    # 노드 간의 엣지 생성
+    num_nodes = x.shape[0]
+    edge_index = torch.tensor([[i, j] for i in range(num_nodes) for j in range(i+1, num_nodes)], dtype=torch.long).t().contiguous()
+
+    data = Data(x=x, edge_index=edge_index, y=y)
+    data_list.append(data)
 
 
+batch_size = 1
+dataloader = DataLoader(data_list, batch_size=batch_size)
 
-# 데이터 전처리 및 그래프 생성
-def preprocess_data(data_samples):
-    all_features = []
-    for sample in data_samples:
-        image_feature = sample['image'].reshape(-1)
-        text_feature = np.array([1 if sample['text'] == 'spam' else 0,
-                                 1 if sample['text'] == 'ham' else 0,
-                                 1 if sample['text'] == 'egg' else 0])
-        numeric_feature = sample['numeric']
-        combined_feature = np.concatenate((image_feature, text_feature, numeric_feature))
-        all_features.append(combined_feature)
-    data_feature_len = len(combined_feature)  # 계산된 총 특성의 길이
-    return torch.FloatTensor(all_features), data_feature_len
+class GCNModel(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim):
+        super(GCNModel, self).__init__()
+        self.conv1 = GCNConv(1, 1)
+        self.conv2 = GCNConv(1, 1)
+        self.linear = nn.Linear(input_dim, 1)
+        self.sigmoid = nn.Sigmoid()  # Add sigmoid activation
+        
+        
+    def forward(self, data):
+        #print("GCN input")
+        x, edge_index = data.x, data.edge_index
+        #print(x.size(),edge_index.size())
+        x=self.conv1(x, edge_index)
+        #print(x.size())
+        x = F.relu(x)
+        x = self.conv2(x, edge_index)
+        #print(x.size())
+        x = self.linear(x.T)
+        #print(x.size())
+        #x = self.sigmoid(x)  # Apply sigmoid activation
+        return x
 
-data_features, data_feature_len = preprocess_data(data_samples_from_images)
+input_dim = data_list[0].x.size(0)
+hidden_dim = 64
+output_dim = 1
 
+model = GCNModel(input_dim, hidden_dim, output_dim)
 
-print(data_features.size(), data_feature_len )
-# 그래프 생성
-g = dgl.DGLGraph()  # 빈 그래프 생성
-
-# 노드 추가
-g.add_nodes(num_samples)  # add_nodes 메소드 사용
-
-# 각 데이터 샘플의 인덱스를 연결하여 엣지 추가
-for i in range(num_samples):
-    for j in range(num_samples):
-        if i != j:
-            g.add_edges(i, j)
-# 레이블 생성
-labels = torch.tensor([0, 1, 0, 1] * (num_samples // 4))  # num_samples 만큼 레이블을 반복
-
-import torch.nn.functional as F
-
-class GraphSAGENet(nn.Module):
-    def __init__(self, in_feats, hidden_feats, num_classes, aggregator_type='mean'):
-        super(GraphSAGENet, self).__init__()
-        self.sage = dglnn.SAGEConv(in_feats, hidden_feats, aggregator_type)
-        self.fc = nn.Linear(hidden_feats, num_classes)
-
-    def forward(self, g, features):
-        h = self.sage(g, features)
-        h = F.relu(h)
-        h = self.fc(h)
-        return h
-# 모델 및 손실 함수, 옵티마이저 초기화
-model = GraphSAGENet(in_feats=1031, hidden_feats=16, num_classes=2)
-criterion = nn.CrossEntropyLoss()
+criterion = nn.BCEWithLogitsLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-# 모델 학습
-for epoch in range(100):
-    optimizer.zero_grad()
-    outputs = model(g, data_features)
+num_epochs = 20
+for epoch in range(num_epochs):
+    for batch_data in dataloader:
+        optimizer.zero_grad()
+        outputs = model(batch_data)
 
-    loss = criterion(outputs, labels)
-    loss.backward()
-    optimizer.step()
-    if (epoch + 1) % 10 == 0:
-        print(f'Epoch [{epoch+1}/100], Loss: {loss.item():.4f}')
+        loss = criterion(outputs, batch_data.y.view(-1, 1))
+        loss.backward()
+        optimizer.step()
+    
+    print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item()}")
 
-print("Training finished!")
+print("Training finished.")
 
-# 임베딩 추출 (t-SNE 차원 축소)
+# 모델 평가
+model.eval()  # 모델을 평가 모드로 변경
+
+correct = 0
+total = 0
+
+# 평가 데이터셋에 대해 예측 및 정확도 계산
 with torch.no_grad():
-    model.eval()
-    embeddings = model(g, data_features).detach().numpy()
+    for batch_data in dataloader:
+        outputs = model(batch_data)
+        predicted = (outputs > 0.5).float()  # 예측값을 0.5를 기준으로 이진 분류
+        
+        total += batch_data.y.size(0)
+        correct += (predicted == batch_data.y.view(-1, 1)).sum().item()
 
-
-
-
-
-
-
-validation_data_samples = [generate_sample_from_image(image_file_paths[0])]  # 검증 데이터 생성
-validation_data_features, _ = preprocess_data(validation_data_samples)  # 데이터 전처리
-
-print(validation_data_features.size())  # 검증 데이터의 특성 크기 출력
-
-# 그래프 생성
-g_predict = dgl.DGLGraph()  # 빈 그래프 생성
-
-# 노드 추가
-g_predict.add_nodes(validation_data_features.size(0))  # 검증 데이터 노드 수와 일치하도록 수정
-
-# 각 데이터 샘플의 인덱스를 연결하여 엣지 추가
-for i in range(validation_data_features.size(0)):
-    for j in range(validation_data_features.size(0)):
-        if i != j:
-            g_predict.add_edges(i, j)
-
-# 검증 데이터에 대한 예측
-with torch.no_grad():
-    validation_outputs = model(g_predict, validation_data_features)
-
-# validation_outputs를 통해 예측 결과를 얻을 수 있습니다.
-predicted_labels = torch.argmax(validation_outputs, dim=1)
-
-print("Predicted labels for validation data:", predicted_labels)
-
-
-
-
-
-
-
-
-# t-SNE 차원 축소
-tsne = TSNE(n_components=3, perplexity=3)
-visual_features_tsne = tsne.fit_transform(data_features.numpy())
-
-# 시각화
-fig = plt.figure(figsize=(10, 8))
-ax = fig.add_subplot(111, projection='3d')
-scatter = ax.scatter(visual_features_tsne[:, 0], visual_features_tsne[:, 1], visual_features_tsne[:, 2], c=labels, cmap='rainbow')
-legend1 = ax.legend(*scatter.legend_elements(), loc="upper right", title="Clusters")
-ax.add_artist(legend1)
-ax.set_title('Clustered Data Points (3D)')
-plt.show()
+accuracy = correct / total
+print(f"Accuracy on the training dataset: {accuracy:.2%}")
