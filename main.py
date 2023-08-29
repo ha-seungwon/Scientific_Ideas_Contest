@@ -160,10 +160,39 @@ model = GCNModel(input_dim, hidden_dim, output_dim)
 criterion = nn.BCEWithLogitsLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.1)
 
+
+dummy_input_dim = 32
+dummy_hidden_dim = 64
+dummy_output_dim = 1
+dummy_data = torch.zeros(dummy_input_dim, dtype=torch.float32)
+dummy_edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)  # 예시 edge index
+
+dummy_model = GCNModel(dummy_input_dim, dummy_hidden_dim, dummy_output_dim)
+total_params = sum(p.numel() for p in dummy_model.parameters())
+gcnconv_params = (dummy_input_dim * dummy_hidden_dim) + dummy_hidden_dim
+
+print("Total parameters in the model:", total_params)
+print("Parameters in one GCNConv layer:", gcnconv_params)
+import torch
+import torchvision.models as models
+
+# ResNet-50 아키텍처 로딩
+resnet_model = models.resnet50(pretrained=False)
+
+# 가상의 데이터로 파라미터 수 계산 (224x224 크기의 이미지를 입력으로 가정)
+dummy_input = torch.zeros(1, 3, 224, 224)  # 1 배치, 3 채널, 224x224 이미지
+
+total_params_resnet = sum(p.numel() for p in resnet_model.parameters())
+
+print("Total parameters in ResNet-50:", total_params_resnet)
+
+
 num_epochs = 20
 for epoch in range(num_epochs):
     for batch_data in dataloader:
         optimizer.zero_grad()
+        
+        #print(batch_data.size())
         outputs = model(batch_data)
 
         loss = criterion(outputs, batch_data.y.view(-1, 1))
