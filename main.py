@@ -32,10 +32,10 @@ def generate_sample_from_image(image_path, index):
     image = image.resize((256, 256))
     image = np.array(image)
     if index % 2 == 0:
-        text = "victim of voice phishing"
+        text = "victim of smishing"
         numeric=[1,2,1,3,1,2,3,1,3]
     else:
-        text = "victim of smishing"
+        text = "victim of voice phishing"
         numeric=[4,5,3,4,5,4,5,5,3]
     
     #numeric = np.random.rand(12)
@@ -46,8 +46,9 @@ def generate_sample_from_image(image_path, index):
 # 데이터 샘플 생성
 
 # 이미지 파일 경로
-image_file_paths = ['./data/smishing1.jpeg','./data/smishing2.jpeg','./data/smishing3.jpeg','./data/smishing4.jpeg','./data/smishing5.jpeg'
-                    ,'./data/voice1.jpeg','./data/voice2.jpeg','./data/voice3.jpeg','./data/voice4.jpeg','./data/voice5.jpeg']
+image_file_paths = ['./data/smishing1.jpeg','./data/voice1.jpeg','./data/smishing2.jpeg','./data/voice2.jpeg',
+                    './data/smishing3.jpeg','./data/voice3.jpeg','./data/smishing4.jpeg','./data/voice4.jpeg',
+                    './data/smishing5.jpeg','./data/voice5.jpeg']
 # 데이터 샘플 생성
 desired_text_feature_length=20
 data_samples_from_images = [generate_sample_from_image(image_path, i) for i, image_path in enumerate(image_file_paths)]
@@ -153,14 +154,11 @@ hidden_dim = 64
 output_dim = 1
 
 
-for i in data_list:
-    print(i)
-print(input_dim)
-
 model = GCNModel(input_dim, hidden_dim, output_dim)
 
+
 criterion = nn.BCEWithLogitsLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=0.1)
 
 num_epochs = 20
 for epoch in range(num_epochs):
